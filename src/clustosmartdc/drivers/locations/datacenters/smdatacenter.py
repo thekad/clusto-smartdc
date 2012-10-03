@@ -33,10 +33,13 @@ class SMDatacenter(basicdatacenter.BasicDatacenter):
             value=key)
 
         self._dc = sm_datacenter.DataCenter(location=loc, key_id=key, **kwargs)
-        for k,v in kwargs.items():
+        for k, v in kwargs.items():
             self.set_attr(key='smartdc', subkey=k, value=v)
 
-    def get_sdc(self):
+    @property
+    def _datacenter(self):
+        "Returns a smartdc.DataCenter instance to work with"
+
         if not self._dc:
             kwargs = {}
             for attr in self.attrs(key='smartdc'):

@@ -6,6 +6,7 @@
 from clusto import exceptions
 from clusto.drivers.devices.servers import BasicVirtualServer
 from clustosmartdc.drivers.locations.datacenters import smdatacenter
+import logging
 
 
 class SMVirtualServer(BasicVirtualServer):
@@ -13,6 +14,19 @@ class SMVirtualServer(BasicVirtualServer):
     _driver_name = 'smserver'
     _port_meta = {}
     _sm = None
+
+    def __init__(self, name_driver_entity, **kwargs):
+
+        BasicVirtualServer.__init__(self, name_driver_entity,
+            **kwargs)
+
+        mid = kwargs.pop('machine_id', None)
+
+        if mid:
+            self.set_attr(key='smartdc', subkey='machine_id', value=mid)
+
+        for k, v in kwargs.items():
+            self.set_attr(key='smartdc', subkey=k, value=v)
 
     @property
     def _instance(self):
@@ -25,8 +39,7 @@ class SMVirtualServer(BasicVirtualServer):
                     'is not parent of this server')
             p = p.pop()
 
-            sdc = p.get_sdc()
-            self._sm = sdc.machine(self.attr_value(key='smartdc',
+            self._sm = p._datacenter.machine(self.attr_value(key='smartdc',
                 subkey='machine_id'))
 
         return self._sm
@@ -64,18 +77,32 @@ class SMVirtualServer(BasicVirtualServer):
         self.del_attrs('system')
 
     def shutdown(self, captcha=True, wait=False):
-        if captcha and not self._power_captcha('shutdown'):
-            return False
-        self._instance.stop()
-        if wait:
-            self._instance.poll_until('stopped')
+        "Stops the instance is it's not already stopped"
+
+        if self.state == 'stopped':
+            pass
+        else:
+            if captcha and not self._power_captcha('shutdown'):
+                return False
+            self._instance.stop()
+            if wait:
+                self._instance.poll_until('stopped')
+
+        return self._instance.state
 
     def start(self, captcha=False, wait=False):
-        if captcha and not self._power_captcha('start'):
-            return False
-        self._instance.start()
-        if wait:
-            self._instance.poll_until('running')
+        "Starts the instance if it's not running"
+
+        if self.state == 'running':
+            pass
+        else:
+            if captcha and not self._power_captcha('start'):
+                return False
+            self._instance.start()
+            if wait:
+                self._instance.poll_until('running')
+
+        return self._instance.state
 
     def reboot(self, captcha=True):
         if captcha and not self._power_captcha('reboot'):
@@ -89,8 +116,6 @@ class SMVirtualServer(BasicVirtualServer):
             raise exceptions.ResourceException('A smartdc datacenter '
                 'is not parent of this server')
         p = p.pop()
-
-        sdc = p.get_sdc()
 
         kwargs = {
             'name': self.name,
@@ -109,7 +134,7 @@ class SMVirtualServer(BasicVirtualServer):
         if dataset:
             kwargs['dataset'] = dataset
 
-        self._sm = sdc.create_machine(**kwargs)
+        self._sm = p._datacenter.create_machine(**kwargs)
 
         if wait:
             self._instance.poll_until('running')
