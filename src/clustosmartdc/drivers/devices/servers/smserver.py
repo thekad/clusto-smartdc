@@ -145,9 +145,8 @@ class SMVirtualServer(BasicVirtualServer):
     def destroy(self, captcha=True, wait=False):
         if captcha and not self._power_captcha('destroy'):
             return False
-        self._instance.stop()
-        if wait:
-            self._instance.poll_until('stopped')
+        if self.state == 'running':
+            self._instance.stop(wait=wait)
         self._instance.delete()
         self.clear_metadata()
         self.entity.delete()
