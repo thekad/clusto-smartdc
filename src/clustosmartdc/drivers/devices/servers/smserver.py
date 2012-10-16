@@ -6,7 +6,8 @@
 from clusto import exceptions
 from clusto.drivers.devices.servers import BasicVirtualServer
 from clustosmartdc.drivers.locations.datacenters import smdatacenter
-import logging
+from clustosmartdc.drivers.resourcemanagers import smdatacentermanager
+import IPy
 
 
 class SMVirtualServer(BasicVirtualServer):
@@ -33,14 +34,16 @@ class SMVirtualServer(BasicVirtualServer):
         "Returns a smartdc.Machine instance to work with"
 
         if not self._sm:
-            p = self.parents(clusto_drivers=[smdatacenter.SMDatacenter])
-            if not p:
-                raise exceptions.ResourceException('A smartdc datacenter '
-                    'is not parent of this server')
-            p = p.pop()
+            res = smdatacentermanager.SMDatacenterManager.resources(self)[0]
+            dcman = smdatacentermanager.SMDatacenterManager.\
+                get_resource_manager(res)
 
-            self._sm = p._datacenter.machine(self.attr_value(key='smartdc',
-                subkey='machine_id'))
+            location = self.attr_value(key='smartdc', subkey='location',
+                merge_container_attrs=True)
+            if not location:
+                raise ValueError('This needs to belong to a datacenter')
+            machine_id = self.attr_value(key='smartdc', subkey='machine_id')
+            self._sm = dcman._connection(location).machine(machine_id)
 
         return self._sm
 
@@ -61,9 +64,11 @@ class SMVirtualServer(BasicVirtualServer):
 
 #       Update the ip addresses
         for ip in self._instance.private_ips:
-            self.add_attr(key='ip', subkey='nic-eth', value=ip)
+            self.add_attr(key='ip', subkey='nic-eth',
+                value=IPy.IP(ip).int())
         for ip in self._instance.public_ips:
-            self.set_attr(key='ip', subkey='ext-eth', value=ip)
+            self.set_attr(key='ip', subkey='ext-eth',
+                value=IPy.IP(ip).int())
 
 #       Update system attributes
         self.set_attr(key='system', subkey='memory',
@@ -109,13 +114,14 @@ class SMVirtualServer(BasicVirtualServer):
             return False
         self._instance.reboot()
 
-    def create(self, captcha=False, wait=False):
+    def create(self, dcmanager, captcha=False, wait=False):
 
         p = self.parents(clusto_drivers=[smdatacenter.SMDatacenter])
         if not p:
             raise exceptions.ResourceException('A smartdc datacenter '
                 'is not parent of this server')
         p = p.pop()
+        location = p.attr_value(key='smartdc', subkey='location')
 
         kwargs = {
             'name': self.name,
@@ -131,22 +137,57 @@ class SMVirtualServer(BasicVirtualServer):
             kwargs['boot_script'] = boot_script
         if package:
             kwargs['package'] = package
+        elif dcmanager._connection(location).default_package():
+            kwargs['package'] = dcmanager._connection(location).\
+                default_package()['name']
+        else:
+            raise ValueError('Need a package to create this instance')
         if dataset:
             kwargs['dataset'] = dataset
+        elif dcmanager._connection(location).default_dataset():
+            kwargs['dataset'] = dcmanager._connection(location).\
+                default_dataset()['urn']
+        else:
+            raise ValueError('Need a dataset to create this instance')
 
-        self._sm = p._datacenter.create_machine(**kwargs)
+        self._sm = dcmanager._connection(location).create_machine(**kwargs)
 
+        result = dcmanager.allocate(self, resource=self._sm)
         if wait:
             self._instance.poll_until('running')
 
         self.set_attr(key='smartdc', subkey='machine_id',
             value=self._sm.id)
 
+        return (result, True)
+
     def destroy(self, captcha=True, wait=False):
         if captcha and not self._power_captcha('destroy'):
             return False
         if self.state == 'running':
-            self._instance.stop(wait=wait)
+            self._instance.stop()
+            if wait:
+                self._instance.poll_until('stopped')
         self._instance.delete()
         self.clear_metadata()
         self.entity.delete()
+
+    def get_ips(self, objects=False):
+        """
+        Returns a list of IP addresses to work with. Alternatively,
+        it can return a list of IPy.IP objects.
+        """
+        ips = []
+        l = self.attr_values(key='ip', subkey='nic-eth')
+        if l:
+            if objects:
+                [ips.append(IPy.IP(_)) for _ in l]
+            else:
+                [ips.append(IPy.IP(_).strNormal()) for _ in l]
+        l = self.attr_values(key='ip', subkey='ext-eth')
+        if l:
+            if objects:
+                [ips.append(IPy.IP(_)) for _ in l]
+            else:
+                [ips.append(IPy.IP(_).strNormal()) for _ in l]
+        return ips

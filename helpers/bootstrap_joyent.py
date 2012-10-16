@@ -9,8 +9,9 @@ import sys
 import clusto
 from clusto import script_helper
 from clusto import drivers
-from clustosmartdc.drivers.locations import smdatacenter
 from clustosmartdc.drivers.devices.servers import smserver
+from clustosmartdc.drivers.locations import smdatacenter
+from clustosmartdc.drivers.resourcemanagers import smdatacentermanager
 import smartdc
 
 
@@ -31,6 +32,10 @@ class BootstrapJoyent(script_helper.Script):
         parser.add_argument('--no-ssh-agent', default=False,
             action='store_true', help='If you do not want to use '
             'SSH agent auth')
+        parser.add_argument('--dcman', default='dcman',
+            help='Name of the datacenter manager object')
+        parser.add_argument('--no-import', default=False, action='store_true',
+            help='Do not import existing machines')
         parser.add_argument('key_id', nargs=1, type=str,
             help='The target key be used (i.e. /user@domain.com/keys/foo)')
 
@@ -39,23 +44,28 @@ class BootstrapJoyent(script_helper.Script):
         self._add_arguments(parser)
 
     def run(self, args):
-        self.info('Creating known joyent locations and importing '
-            'existing machines')
+        self.info('Creating the datacenter manager')
+
         key = args.key_id.pop()
+        dcman = clusto.get_or_create(args.dcman,
+            smdatacentermanager.SMDatacenterManager,
+            key_id=key)
 
         p = None
         if args.add_to_pool:
             p = clusto.get_or_create(args.add_to_pool, drivers.pool.Pool)
 
+        self.info('Creating known joyent locations and importing '
+            'existing machines')
         for loc, url in smartdc.KNOWN_LOCATIONS.items():
             self.debug('Creating location %s' % (loc,))
             sdc = clusto.get_or_create(loc, smdatacenter.SMDatacenter,
-                key_id=key, location=loc)
+                location=loc)
             if p and sdc not in p:
                 p.insert(sdc)
             self.debug('Testing connectivity to %s' % (loc,))
             try:
-                machines = sdc._datacenter.machines()
+                machines = dcman._connection(loc).machines()
                 self.debug('Number of existing machines: %d' %
                     (len(machines),))
             except Exception as e:
@@ -63,14 +73,20 @@ class BootstrapJoyent(script_helper.Script):
                 self.error('Your credentials seem to be incorrect for %s' %
                     (loc,))
                 continue
-            for machine in machines:
-                self.debug('Getting/creating clusto object for %s' %
-                    (machine))
-                n = clusto.get_or_create(machine.name,
-                    smserver.SMVirtualServer, machine_id=machine.id)
-                if n not in sdc:
-                    sdc.insert(n)
-                n.update_metadata()
+            if not args.no_import:
+                for machine in machines:
+                    self.debug('Getting/creating clusto object for %s' %
+                        (machine))
+                    name = machine.name or machine.id.replace('-', '_')
+                    n = clusto.get_or_create(name,
+                        smserver.SMVirtualServer, machine_id=machine.id)
+                    if n not in sdc:
+                        sdc.insert(n)
+                    if n not in dcman.referencers():
+                        dcman.allocate(n, resource=machine)
+                        n.update_metadata()
+                    self.debug('%s is imported' % (machine,))
+            self.info('Created and imported resources for %s' % (loc,))
         self.info('Done.')
 
 
