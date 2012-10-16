@@ -10,7 +10,7 @@ import sys
 
 
 setuptools.setup(
-    name = "clustosmartdc",
+    name = "clusto-smartdc",
     version = "0.1",
     packages = setuptools.find_packages('src'),
     author = 'Jorge Gallegos',

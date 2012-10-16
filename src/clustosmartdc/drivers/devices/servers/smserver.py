@@ -81,12 +81,10 @@ class SMVirtualServer(BasicVirtualServer):
         self.del_attrs('ip')
         self.del_attrs('system')
 
-    def shutdown(self, captcha=True, wait=False):
-        "Stops the instance is it's not already stopped"
+    def power_off(self, captcha=True, wait=False):
+        "Stops the instance is it's running"
 
-        if self.state == 'stopped':
-            pass
-        else:
+        if self.state == 'running':
             if captcha and not self._power_captcha('shutdown'):
                 return False
             self._instance.stop()
@@ -95,12 +93,10 @@ class SMVirtualServer(BasicVirtualServer):
 
         return self._instance.state
 
-    def start(self, captcha=False, wait=False):
-        "Starts the instance if it's not running"
+    def power_on(self, captcha=False, wait=False):
+        "Starts the instance if it's stopped"
 
-        if self.state == 'running':
-            pass
-        else:
+        if self.state == 'stopped':
             if captcha and not self._power_captcha('start'):
                 return False
             self._instance.start()
@@ -109,10 +105,15 @@ class SMVirtualServer(BasicVirtualServer):
 
         return self._instance.state
 
-    def reboot(self, captcha=True):
-        if captcha and not self._power_captcha('reboot'):
-            return False
-        self._instance.reboot()
+    def power_reboot(self, captcha=True):
+        "Reboots the instance if it's running"
+
+        if self.state == 'running':
+            if captcha and not self._power_captcha('reboot'):
+                return False
+            self._instance.reboot()
+
+        return self.state
 
     def create(self, dcmanager, captcha=False, wait=False):
 
