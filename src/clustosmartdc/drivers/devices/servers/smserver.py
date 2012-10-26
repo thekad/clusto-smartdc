@@ -34,15 +34,19 @@ class SMVirtualServer(BasicVirtualServer):
         "Returns a smartdc.Machine instance to work with"
 
         if not self._sm:
+            machine_data = self.attr_value(key='smdcmanager',
+                subkey='machine')
+            if not machine_data:
+                return None
+            machine_id = machine_data.get('id')
+            if not machine_id:
+                return None
+
             res = smdatacentermanager.SMDatacenterManager.resources(self)[0]
             dcman = smdatacentermanager.SMDatacenterManager.\
                 get_resource_manager(res)
 
-            location = self.attr_value(key='smartdc', subkey='location',
-                merge_container_attrs=True)
-            if not location:
-                raise ValueError('This needs to belong to a datacenter')
-            machine_id = self.attr_value(key='smartdc', subkey='machine_id')
+            location = res.value.get('location')
             self._sm = dcman._connection(location).machine(machine_id)
 
         return self._sm
@@ -55,7 +59,7 @@ class SMVirtualServer(BasicVirtualServer):
         return self._instance.state
 
     def console(self, *args, **kwargs):
-        raise NotImplementedError
+        raise NotImplementedError('No console access on this device')
 
     def update_metadata(self, *args, **kwargs):
         "Updates the metadata information from the provider"
@@ -115,18 +119,20 @@ class SMVirtualServer(BasicVirtualServer):
 
         return self.state
 
-    def create(self, dcmanager, captcha=False, wait=False):
+    def create(self, captcha=False, wait=False):
 
-        p = self.parents(clusto_drivers=[smdatacenter.SMDatacenter])
-        if not p:
-            raise exceptions.ResourceException('A smartdc datacenter '
-                'is not parent of this server')
-        p = p.pop()
-        location = p.attr_value(key='smartdc', subkey='location')
+        if self._sm:
+            raise ResourceException('This instance is already created')
+
+        res = smdatacentermanager.SMDatacenterManager.resources(self)[0]
+        mgr = smdatacentermanager.SMDatacenterManager.get_resource_manager(res)
+
+        location = res.value.get('location')
 
         kwargs = {
             'name': self.name,
         }
+
         boot_script = self.attr_value(key='smartdc', subkey='boot_script',
             merge_container_attrs=True)
         package = self.attr_value(key='smartdc', subkey='package',
@@ -136,29 +142,29 @@ class SMVirtualServer(BasicVirtualServer):
 
         if boot_script:
             kwargs['boot_script'] = boot_script
+
         if package:
             kwargs['package'] = package
-        elif dcmanager._connection(location).default_package():
-            kwargs['package'] = dcmanager._connection(location).\
+        elif mgr._connection(location).default_package():
+            kwargs['package'] = mgr._connection(location).\
                 default_package()['name']
         else:
             raise ValueError('Need a package to create this instance')
+
         if dataset:
             kwargs['dataset'] = dataset
-        elif dcmanager._connection(location).default_dataset():
-            kwargs['dataset'] = dcmanager._connection(location).\
+        elif mgr._connection(location).default_dataset():
+            kwargs['dataset'] = mgr._connection(location).\
                 default_dataset()['urn']
         else:
             raise ValueError('Need a dataset to create this instance')
 
-        self._sm = dcmanager._connection(location).create_machine(**kwargs)
+        self._sm = mgr._connection(location).create_machine(**kwargs)
 
-        result = dcmanager.allocate(self, resource=self._sm)
         if wait:
             self._instance.poll_until('running')
 
-        self.set_attr(key='smartdc', subkey='machine_id',
-            value=self._sm.id)
+        result = mgr.additional_attrs(self, resource={'machine': self._sm})
 
         return (result, True)
 
