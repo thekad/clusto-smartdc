@@ -5,7 +5,6 @@
 
 from clusto import exceptions
 from clusto.drivers.devices.servers import BasicVirtualServer
-from clustosmartdc.drivers.locations.datacenters import smdatacenter
 from clustosmartdc.drivers.resourcemanagers import smdatacentermanager
 import IPy
 
@@ -15,6 +14,10 @@ class SMVirtualServer(BasicVirtualServer):
     _driver_name = 'smserver'
     _port_meta = {}
     _sm = None
+    _int_ip_const = 2147483648
+
+    def _int_to_ipy(self, num):
+        return IPy.IP(num + self._int_ip_const)
 
     def __init__(self, name_driver_entity, **kwargs):
 
@@ -61,7 +64,7 @@ class SMVirtualServer(BasicVirtualServer):
     def console(self, *args, **kwargs):
         raise NotImplementedError('No console access on this device')
 
-    def update_metadata(self, *args, **kwargs):
+    def update_system_metadata(self, *args, **kwargs):
         "Updates the metadata information from the provider"
 
         self.clear_metadata()
@@ -79,6 +82,12 @@ class SMVirtualServer(BasicVirtualServer):
             value=self._instance.memory)
         self.set_attr(key='system', subkey='disk',
             value=self._instance.disk)
+
+#       Update the smartdc metadata
+        m = self._instance.metadata
+        'root_authorized_keys' in m and m.pop('root_authorized_keys')
+        if m:
+            self.set_attr(key='smartdc', subkey='metadata', value=m)
 
     def clear_metadata(self, *args, **kwargs):
         "Clears the metadata previously fetched from the provider"
@@ -122,7 +131,8 @@ class SMVirtualServer(BasicVirtualServer):
     def create(self, captcha=False, wait=False):
 
         if self._sm:
-            raise ResourceException('This instance is already created')
+            raise exceptions.ResourceException(
+                'This instance is already created')
 
         res = smdatacentermanager.SMDatacenterManager.resources(self)[0]
         mgr = smdatacentermanager.SMDatacenterManager.get_resource_manager(res)
@@ -188,13 +198,13 @@ class SMVirtualServer(BasicVirtualServer):
         l = self.attr_values(key='ip', subkey='nic-eth')
         if l:
             if objects:
-                [ips.append(IPy.IP(_)) for _ in l]
+                [ips.append(self._int_to_ipy(_)) for _ in l]
             else:
-                [ips.append(IPy.IP(_).strNormal()) for _ in l]
+                [ips.append(self._int_to_ipy(_).strNormal()) for _ in l]
         l = self.attr_values(key='ip', subkey='ext-eth')
         if l:
             if objects:
-                [ips.append(IPy.IP(_)) for _ in l]
+                [ips.append(self._int_to_ipy(_)) for _ in l]
             else:
-                [ips.append(IPy.IP(_).strNormal()) for _ in l]
+                [ips.append(self._int_to_ipy(_).strNormal()) for _ in l]
         return ips
