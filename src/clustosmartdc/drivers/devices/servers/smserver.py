@@ -64,7 +64,7 @@ class SMVirtualServer(BasicVirtualServer):
     def console(self, *args, **kwargs):
         raise NotImplementedError('No console access on this device')
 
-    def update_system_metadata(self, *args, **kwargs):
+    def update_metadata(self, *args, **kwargs):
         "Updates the metadata information from the provider"
 
         self.clear_metadata()
